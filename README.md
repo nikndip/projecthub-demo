@@ -1,78 +1,123 @@
 # ProjectHub Demo
 
-A compact public demonstration of a project and finance workflow built with Go and PostgreSQL.
+Публичная демонстрация одного из ключевых бизнес-процессов проектно-финансовой CRM на Go и PostgreSQL.
 
 > [!IMPORTANT]
-> This repository is a clean-room demo created for technical review. It is not the source code of the production CRM, does not contain client data, and does not reproduce confidential business rules. The production system is private because it was developed for a specific client.
+> Это самостоятельная clean-room реализация для технического знакомства с проектом. Репозиторий не содержит исходный код production-системы, данные заказчика или его конфиденциальные бизнес-правила. Все названия, суммы и записи в примерах и на скриншотах синтетические.
 
-## What this demo shows
+## О проекте
 
-- modular Go application with HTTP, application and persistence boundaries;
-- PostgreSQL schema constraints and transactional writes;
-- money represented as integer kopecks, never `float`;
-- concurrency-safe budget reservation with `SELECT ... FOR UPDATE`;
-- strict JSON decoding and domain-oriented HTTP errors;
-- graceful shutdown, structured logging and health checks;
-- unit and HTTP tests, race detection and CI;
-- reproducible local environment with Docker Compose.
+Основной ProjectHub — закрытая внутренняя CRM, созданная для заказчика и используемая в production. Полная система объединяет проекты, тендеры, рабочие сметы, заявки на оплату, клиентские счета, акты, контрагентов, договоры, уведомления и административные расходы.
 
-## Business scenario
+В этом репозитории реализован небольшой, но законченный вертикальный срез: создание проектов и конкурентно-безопасное резервирование их бюджета заявками на оплату. Такой объём позволяет показать архитектуру и работу с транзакциями, не раскрывая код закрытой системы.
 
-A project has an approved budget. Users can create payment requests against that budget. Creating a request reserves money immediately. Concurrent requests cannot reserve more than the available amount because the project row is locked and checked inside one database transaction.
+## Что демонстрирует репозиторий
+
+- разделение приложения на HTTP-, application-, domain- и persistence-слои;
+- REST API на стандартном `net/http`;
+- PostgreSQL-репозиторий на `pgx`;
+- хранение денег целыми копейками без `float`;
+- ограничения целостности на уровне схемы базы данных;
+- транзакционное резервирование бюджета;
+- блокировку строки проекта через `SELECT ... FOR UPDATE`;
+- защиту от превышения бюджета при конкурентных запросах;
+- строгий разбор JSON и доменные HTTP-ошибки;
+- структурированное логирование, healthcheck и корректное завершение сервера;
+- unit- и HTTP-тесты, race detector и GitHub Actions;
+- воспроизводимый запуск через Docker Compose.
+
+## Интерфейс полной системы
+
+Ниже показаны обезличенные экраны закрытой CRM. Они иллюстрируют интерфейс и предметную область полной системы; сам demo-репозиторий содержит только описанный backend-срез.
+
+### Реестр проектов
+
+![Обезличенный реестр проектов ProjectHub](assets/screenshots/projects.png)
+
+### Единый реестр документов
+
+![Обезличенный реестр документов ProjectHub](assets/screenshots/documents.png)
+
+На экране видны фильтры по проектам, тендерам, контрагентам, ответственным, типам и статусам документов.
+
+На изображениях нет реальных ФИО, названий компаний, ИНН, договоров или финансовых показателей заказчика.
+
+## Бизнес-сценарий demo
+
+У проекта есть утверждённый бюджет. Пользователь создаёт заявку на оплату, после чего её сумма сразу резервируется. Несколько одновременных запросов не могут зарезервировать больше доступного остатка: проверка и изменение выполняются внутри одной PostgreSQL-транзакции.
 
 ```text
-HTTP request
-    |
-    v
-Handler -> Application service -> Repository -> PostgreSQL
-                                      |
-                                      +-> lock project
-                                      +-> validate available budget
-                                      +-> create payment request
-                                      +-> update reserved amount
-                                      +-> commit
+HTTP-запрос
+    │
+    ▼
+Handler → Application service → Repository → PostgreSQL
+                                          │
+                                          ├─ блокировка проекта
+                                          ├─ проверка остатка
+                                          ├─ создание заявки
+                                          ├─ резервирование суммы
+                                          └─ commit
 ```
 
-## Quick start
+Деньги передаются и хранятся в копейках. Например, `2500000` означает `25 000,00 ₽`.
 
-Requirements: Docker with Docker Compose.
+## Технологии
+
+- Go 1.25.13;
+- PostgreSQL 17;
+- `pgx/v5` и `pgxpool`;
+- стандартный `net/http`;
+- Docker и Docker Compose;
+- GitHub Actions.
+
+## Быстрый запуск
+
+Потребуются Docker и Docker Compose.
 
 ```bash
 docker compose up --build
 ```
 
-The API will be available at `http://localhost:8080`.
+API будет доступно по адресу <http://localhost:8080>.
 
-If port `8080` is already in use, choose another host port:
+Если порт `8080` уже занят:
 
 ```bash
 HOST_PORT=18082 docker compose up --build
 ```
 
-Create a project:
+Проверка готовности:
+
+```bash
+curl http://localhost:8080/healthz
+```
+
+## Примеры запросов
+
+Создать проект с бюджетом `150 000,00 ₽`:
 
 ```bash
 curl -i http://localhost:8080/api/v1/projects \
   -H 'Content-Type: application/json' \
   -d '{
-    "name": "Product launch",
-    "client": "Acme",
+    "name": "Демо-проект",
+    "client": "Демо-клиент",
     "budget_kopecks": 15000000
   }'
 ```
 
-Create a payment request:
+Создать заявку на `25 000,00 ₽`:
 
 ```bash
 curl -i http://localhost:8080/api/v1/projects/1/payment-requests \
   -H 'Content-Type: application/json' \
   -d '{
-    "purpose": "Production services",
+    "purpose": "Услуги производства",
     "amount_kopecks": 2500000
   }'
 ```
 
-List projects and their reserved amounts:
+Получить список проектов и зарезервированные суммы:
 
 ```bash
 curl http://localhost:8080/api/v1/projects
@@ -80,38 +125,60 @@ curl http://localhost:8080/api/v1/projects
 
 ## API
 
-| Method | Path | Purpose |
+| Метод | Маршрут | Назначение |
 |---|---|---|
-| `GET` | `/healthz` | database readiness check |
-| `GET` | `/api/v1/projects` | list projects |
-| `POST` | `/api/v1/projects` | create a project |
-| `POST` | `/api/v1/projects/{id}/payment-requests` | reserve budget and create a payment request |
+| `GET` | `/healthz` | проверка доступности PostgreSQL |
+| `GET` | `/api/v1/projects` | список проектов |
+| `POST` | `/api/v1/projects` | создание проекта |
+| `POST` | `/api/v1/projects/{id}/payment-requests` | резервирование бюджета и создание заявки |
 
-All monetary values use integer kopecks. For example, `2500000` means `25,000.00 RUB`.
+## Конкурентная безопасность
 
-## Run checks
+Создание заявки выполняется в одной транзакции:
+
+1. Строка проекта блокируется `SELECT ... FOR UPDATE`.
+2. Рассчитывается доступный остаток `budget_kopecks - reserved_kopecks`.
+3. При нехватке средств возвращается доменная ошибка `project budget exceeded`.
+4. Создаётся заявка на оплату.
+5. Зарезервированная сумма проекта увеличивается.
+6. Транзакция фиксируется.
+
+В Docker-проверке два одновременных запроса по `7 000` копеек к бюджету `10 000` дали ожидаемый результат: один запрос получил HTTP `201`, второй — HTTP `409`. Итоговый резерв составил `7 000` копеек, переполнение не произошло.
+
+## Тестирование и качество
 
 ```bash
 go test -race ./...
 go vet ./...
+staticcheck ./...
+golangci-lint run ./...
 govulncheck ./...
 ```
 
-## Repository layout
+Локально и в GitHub Actions проходят unit- и HTTP-тесты, `go vet` и race detector. `govulncheck` не находит известных уязвимостей в используемой конфигурации.
+
+## Структура репозитория
 
 ```text
-cmd/api/                    application entry point
-internal/app/               use cases and validation
-internal/domain/            domain models and errors
-internal/httpapi/           HTTP transport
-internal/store/postgres/    PostgreSQL repository and migration
-.github/workflows/          continuous integration
+cmd/api/                    точка запуска HTTP-приложения
+internal/app/               сценарии использования и валидация
+internal/domain/            доменные модели и ошибки
+internal/httpapi/           HTTP-транспорт
+internal/store/postgres/    PostgreSQL-репозиторий и миграция
+assets/screenshots/         обезличенные изображения интерфейса
+.github/workflows/          непрерывная интеграция
 ```
 
-## Scope
+Основное направление зависимостей:
 
-The demo intentionally focuses on one complete workflow instead of recreating the full private product. Authentication, the browser UI, tenders, estimates, invoices, documents and client-specific processes are outside this public example.
+```text
+HTTP handler → application service → repository → PostgreSQL
+```
 
-## License
+## Границы demo
 
-MIT. No client source code or confidential materials are included.
+Репозиторий намеренно не воспроизводит всю закрытую CRM. В него не включены авторизация, SSR-интерфейс, тендеры, полная смета, клиентские счета, акты, договоры, файлы, уведомления и процессы согласования. Эти модули перечислены только как контекст production-системы и не заявляются как функциональность данного demo.
+
+## Лицензия
+
+MIT. Репозиторий не содержит клиентский код, персональные данные или конфиденциальные материалы.
